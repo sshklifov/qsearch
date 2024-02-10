@@ -4,8 +4,13 @@ if exists(':Rgrep')
   finish
 endif
 
-let g:qsearch_exclude_dirs = [".cache", ".git", "Debug", "Release"]
-let g:qsearch_exclude_files = ["compile_commands.json", ".ccls"]
+if !exists('g:qsearch_exclude_dirs')
+  let g:qsearch_exclude_dirs = []
+endif
+
+if !exists('g:qsearch_exclude_files')
+  let g:qsearch_exclude_files = []
+endif
 
 function! s:ExcludeFile(file)
   for dir in g:qsearch_exclude_dirs
