@@ -28,8 +28,8 @@ endfunction
 
 function! s:OpenQfResults()
   let len = getqflist({"size": 1})['size']
-  if len == 0
-    echo "No results"
+  if len <= 0
+    echo "No entries"
   elseif len == 1
     cc
   else
@@ -75,7 +75,7 @@ function! Grep(regex, where)
   endif
 
   call chanclose(id, 'stdin')
-  call jobwait([id]) " Need to know length of items
+  call jobwait([id])
   call s:OpenQfResults()
 endfunction
 
