@@ -67,32 +67,29 @@ function! Grep(regex, where)
 
   if type(a:where) == v:t_list
     let cmd = ['xargs'] + cmd
-    let id = jobstart(cmd, {'on_stdout': function('OnEvent') } )
+    let id = jobstart(cmd, {'on_stdout': function('OnEvent'), 'on_exit': {-> s:OpenQfResults()}})
     call chansend(id, a:where)
   else
     let cmd = cmd + ['-R', a:where]
-    let id = jobstart(cmd, {'on_stdout': function('OnEvent') } )
+    let id = jobstart(cmd, {'on_stdout': function('OnEvent'), 'on_exit': {-> s:OpenQfResults()}})
   endif
-
   call chanclose(id, 'stdin')
-  call jobwait([id]) " Need to know length of items
-  call s:OpenQfResults()
 endfunction
 
 function! s:GrepQuickfixFiles(regex)
   let files = map(getqflist(), 'expand("#" . v:val["bufnr"] . ":p")')
   let files = uniq(sort(files))
-  call s:Grep(a:regex, files)
+  call Grep(a:regex, files)
 endfunction
 
 " Current buffer
-command! -nargs=1 Grep call <SID>Grep(<q-args>, [expand("%:p")])
+command! -nargs=1 Grep call Grep(<q-args>, [expand("%:p")])
 " All files in quickfix
 command! -nargs=1 Cgrep call <SID>GrepQuickfixFiles(<q-args>)
 " Current path
-command! -nargs=1 Rgrep call <SID>Grep(<q-args>, getcwd())
+command! -nargs=1 Rgrep call Grep(<q-args>, getcwd())
 
-function! Find(dir, arglist, Cb)
+function! Find(dir, arglist, EventCb, ...)
   if empty(a:dir)
     return
   endif
@@ -117,7 +114,12 @@ function! Find(dir, arglist, Cb)
         \ ]
 
   let cmd = ["find",  fnamemodify(a:dir, ':p')] + flags
-  let id = jobstart(cmd, {'on_stdout': a:Cb})
+
+  if a:0 > 0
+    let id = jobstart(cmd, {'on_stdout': a:EventCb, 'on_exit': a:1})
+  else
+    let id = jobstart(cmd, {'on_stdout': a:EventCb})
+  endif
   call chanclose(id, 'stdin')
   return id
 endfunction
@@ -144,9 +146,7 @@ function! FindInQuickfix(dir, pat, ...)
 
   " Perform find operation
   call setqflist([], ' ', {'title' : 'Find', 'items' : []})
-  let id = s:Find(a:dir, flags, function("PopulateQuickfix"))
-  call jobwait([id])
-  call s:OpenQfResults()
+  let id = Find(a:dir, flags, function("PopulateQuickfix"), {-> s:OpenQfResults()})
 endfunction
 
 function! s:FindInWorkspace(pat)
@@ -155,11 +155,11 @@ function! s:FindInWorkspace(pat)
     if empty(dir)
       echo "Not in workspace"
     else
-      call s:FindInQuickfix(dir, a:pat)
+      call FindInQuickfix(dir, a:pat)
     endif
   endif
 endfunction
 
-command! -nargs=0 List call <SID>FindInQuickfix(getcwd(), "", ['-maxdepth', 1])
-command! -nargs=1 -complete=dir Find call <SID>FindInQuickfix(<q-args>, "")
+command! -nargs=0 List call FindInQuickfix(getcwd(), "", ['-maxdepth', 1])
+command! -nargs=1 -complete=dir Find call FindInQuickfix(<q-args>, "")
 command! -nargs=? Workspace call <SID>FindInWorkspace(<q-args>)
