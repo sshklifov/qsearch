@@ -26,6 +26,10 @@ function! s:ExcludeFile(file)
   return v:false
 endfunction
 
+function! SearchFilter(list)
+  return filter(a:list, "!s:ExcludeFile(v:val)")
+endfunction
+
 function! s:OpenQfResults()
   let len = getqflist({"size": 1})['size']
   if len <= 0
