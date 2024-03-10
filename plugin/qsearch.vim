@@ -79,7 +79,6 @@ function! Grep(regex, where)
   endif
   call chanclose(id, 'stdin')
   call jobwait([id])
-  call s:OpenQfResults()
 endfunction
 
 function! s:GrepQuickfixFiles(regex)
