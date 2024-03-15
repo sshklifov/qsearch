@@ -89,7 +89,7 @@ function! QuickGrep(regex, where)
 endfunction
 
 function! s:GrepFilesInQuickfix(regex)
-  let files = map(getqflist(), 'expand("#" . v:val["bufnr"] . ":p")')
+  let files = map(getqflist(), 'expand("#" . v:val.bufnr . ":p")')
   let files = uniq(sort(files))
   call QuickGrep(a:regex, files)
 endfunction
@@ -165,7 +165,7 @@ function! FindCompl(ArgLead, CmdLine, CursorPos) abort
   let output = substitute(output, "\x1b].*\x1b\\", "", "")
   " Split into lines
   let output = split(output, nr2char(10))
-  " Split by tab
+  " Split by tab (remove completion description)
   let compl = map(output, "split(v:val, nr2char(9))[0]")
   return compl
 endfunction
