@@ -101,13 +101,7 @@ command! -nargs=1 Grepfix call <SID>GrepFilesInQuickfix(<q-args>)
 " Current path
 command! -nargs=1 Rgrep call QuickGrep(<q-args>, getcwd())
 
-function! QuickFind(dir, ...)
-  let s:items = []
-  function! CollectItems(id, data, event)
-    let files = filter(a:data, "filereadable(v:val)")
-    let s:items += map(files, "#{filename: v:val}")
-  endfunction
-
+function! s:CmdFind(dir, ...)
   " Add exclude paths flags
   let flags = []
   for dir in g:qsearch_exclude_dirs
@@ -133,8 +127,24 @@ function! QuickFind(dir, ...)
 
   let fullpath = fnamemodify(a:dir, ':p')
   let cmd = ["find", fullpath] + flags
+  return cmd
+endfunction
+
+function! QuickFind(dir, ...)
+  let s:items = []
+  function! CollectItems(id, data, event)
+    let files = filter(a:data, "filereadable(v:val)")
+    let s:items += map(files, "#{filename: v:val}")
+  endfunction
+
+  let cmd = s:CmdFind(a:dir, a:000)
   let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems('Find')}}
   return jobstart(cmd, opts)
+endfunction
+
+function Find(dir, ...)
+  let cmd = s:CmdFind(a:dir, a:000)
+  return systemlist(cmd)
 endfunction
 
 function! s:ListCmd(args)
