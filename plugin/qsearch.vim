@@ -12,6 +12,10 @@ if !exists('g:qsearch_exclude_files')
   let g:qsearch_exclude_files = []
 endif
 
+function! SearchFilter(list)
+  return filter(a:list, "!s:ExcludeFile(v:val)")
+endfunction
+
 function! s:ExcludeFile(file)
   for dir in g:qsearch_exclude_dirs
     if stridx(a:file, dir) >= 0
@@ -26,40 +30,38 @@ function! s:ExcludeFile(file)
   return v:false
 endfunction
 
-function! SearchFilter(list)
-  return filter(a:list, "!s:ExcludeFile(v:val)")
-endfunction
-
-function! s:OpenQfResults()
-  let len = getqflist({"size": 1})['size']
-  if len <= 0
+function! s:ShowItems(title)
+  if empty(s:items)
     echo "No entries"
-  elseif len == 1
+  else
+    call setqflist([], ' ', #{title: a:title, items: s:items})
+  endif
+  if len(s:items) == 1
     cc
   else
     copen
   endif
+  unlet s:items
 endfunction
 
-function! Grep(regex, where)
-  call setqflist([], ' ', {'title' : 'Grep', 'items' : []})
+function! QuickGrep(regex, where)
+  function! Itemize(index, match)
+    let sp = split(a:match, ":")
+    if len(sp) < 3
+      return {}
+    endif
+    if !filereadable(sp[0]) || s:ExcludeFile(sp[0])
+      return {}
+    endif
+    if sp[1] !~ '^[0-9]\+$'
+      return {}
+    endif
+    return {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
+  endfunction
 
-  function! OnEvent(id, data, event)
-    function! GetGrepItem(index, match)
-      let sp = split(a:match, ":")
-      if len(sp) < 3
-        return {}
-      endif
-      if !filereadable(sp[0]) || s:ExcludeFile(sp[0])
-        return {}
-      endif
-      if sp[1] !~ '^[0-9]\+$'
-        return {}
-      endif
-      return {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
-    endfunction
-    let items = filter(map(a:data, function("GetGrepItem")), "!empty(v:val)")
-    call setqflist([], 'a', {'items' : items})
+  let s:items = []
+  function! CollectItems(id, data, event)
+    let s:items += filter(map(a:data, funcref("Itemize")), "!empty(v:val)")
   endfunction
 
   let cmd = ['grep']
@@ -68,103 +70,97 @@ function! Grep(regex, where)
     let cmd = cmd + ['-i']
   endif
   let cmd = cmd + ['-I', '-H', '-n', a:regex]
+  let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems("Grep")}}
 
   if type(a:where) == v:t_list
     let cmd = ['xargs'] + cmd
-    let id = jobstart(cmd, {'on_stdout': function('OnEvent'), 'on_exit': {-> s:OpenQfResults()}})
+    let id = jobstart(cmd, opts)
     call chansend(id, a:where)
-  else
+    call chanclose(id, 'stdin')
+    return id
+  elseif isdirectory(a:where)
     let cmd = cmd + ['-R', a:where]
-    let id = jobstart(cmd, {'on_stdout': function('OnEvent'), 'on_exit': {-> s:OpenQfResults()}})
+    return jobstart(cmd, opts)
+  else
+    let fullpath = fnamemodify(a:where, ":p")
+    let cmd = cmd + [fullpath]
+    return jobstart(cmd, opts)
   endif
-  call chanclose(id, 'stdin')
-  call jobwait([id])
 endfunction
 
-function! s:GrepQuickfixFiles(regex)
+function! s:GrepFilesInQuickfix(regex)
   let files = map(getqflist(), 'expand("#" . v:val["bufnr"] . ":p")')
   let files = uniq(sort(files))
-  call Grep(a:regex, files)
+  call QuickGrep(a:regex, files)
 endfunction
 
 " Current buffer
-command! -nargs=1 Grep call Grep(<q-args>, [expand("%:p")])
+command! -nargs=1 Grep call QuickGrep(<q-args>, expand("%:p"))
 " All files in quickfix
-command! -nargs=1 Cgrep call <SID>GrepQuickfixFiles(<q-args>)
+command! -nargs=1 Grepfix call <SID>GrepFilesInQuickfix(<q-args>)
 " Current path
-command! -nargs=1 Rgrep call Grep(<q-args>, getcwd())
+command! -nargs=1 Rgrep call QuickGrep(<q-args>, getcwd())
 
-function! Find(dir, arglist, EventCb, ...)
-  if empty(a:dir)
-    return
-  endif
+function! QuickFind(dir, ...)
+  let s:items = []
+  function! CollectItems(id, data, event)
+    let files = filter(a:data, "filereadable(v:val)")
+    let s:items += map(files, "#{filename: v:val}")
+  endfunction
 
   " Add exclude paths flags
   let flags = []
   for dir in g:qsearch_exclude_dirs
     let flags = flags + ["-path", "**/" . dir, "-prune", "-false", "-o"]
   endfor
-  for file in g:qsearch_exclude_files
-    let flags = flags + ["-not", "-name", file]
+  for ff in g:qsearch_exclude_files
+    let flags = flags + ["-not", "-name", ff]
   endfor
 
   " Exclude directorties from results
   let flags = flags + ["-type", "f"]
   " Add user flags
-  let flags = flags + a:arglist
+  if a:0 == 1 && type(a:1) == v:t_list
+    let flags += a:1
+  else
+    let flags += a:000
+  endif
   " Add actions (ignore binary files)
   let flags = flags + [
         \ "-exec", "grep", "-Iq", ".", "{}", ";",
         \ "-print"
         \ ]
 
-  let cmd = ["find",  fnamemodify(a:dir, ':p')] + flags
-
-  if a:0 > 0
-    let id = jobstart(cmd, {'on_stdout': a:EventCb, 'on_exit': a:1})
-  else
-    let id = jobstart(cmd, {'on_stdout': a:EventCb})
-  endif
-  call chanclose(id, 'stdin')
-  return id
+  let fullpath = fnamemodify(a:dir, ':p')
+  let cmd = ["find", fullpath] + flags
+  let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems('Find')}}
+  return jobstart(cmd, opts)
 endfunction
 
-function! FindInQuickfix(dir, pat, ...)
-  function! PopulateQuickfix(id, data, event)
-    let files = filter(a:data, "filereadable(v:val)")
-    let items = map(files, {_, f -> {'filename': f, 'lnum': 1, 'col': 1, 'text': fnamemodify(f, ':t')} })
-    call setqflist([], 'a', {'items' : items})
-  endfunction
-
-  let flags = []
-  if !empty(a:pat)
-    let regex = ".*" . a:pat . ".*"
-    " Apply 'smartcase' to the regex
-    if regex =~# "[A-Z]"
-      let flags = ["-regex", regex]
-    else
-      let flags = ["-iregex", regex]
-    endif
+function! s:ListCmd(args)
+  let dir = a:args
+  if empty(dir)
+    let dir = getcwd()
   endif
-  " Add user args (optional)
-  let flags += get(a:, 1, [])
-
-  " Perform find operation
-  call setqflist([], ' ', {'title' : 'Find', 'items' : []})
-  let id = Find(a:dir, flags, function("PopulateQuickfix"), {-> s:OpenQfResults()})
+  call Quickfind(dir, '-maxdepth', 1)
 endfunction
 
-function! s:FindInWorkspace(pat)
-  if exists("*FugitiveWorkTree")
-    let dir = FugitiveWorkTree()
-    if empty(dir)
-      echo "Not in workspace"
-    else
-      call FindInQuickfix(dir, a:pat)
-    endif
+command! -nargs=? -complete=dir List call <SID>ListCmd(<q-args>)
+
+function! FindCompl(ArgLead, CmdLine, CursorPos) abort
+  if a:CursorPos < len(a:CmdLine)
+    return []
   endif
+  let complete = 'complete -C ' . shellescape(substitute(a:CmdLine, 'Find', 'find', ''))
+  let output = system(["/usr/bin/fish", "-c", complete])
+
+  " Remove color codes
+  let output = substitute(output, "\x1b].*\x1b\\", "", "")
+  " Split into lines
+  let output = split(output, nr2char(10))
+  " Split by tab
+  let compl = map(output, "split(v:val, nr2char(9))[0]")
+  return compl
 endfunction
 
-command! -nargs=0 List call FindInQuickfix(getcwd(), "", ['-maxdepth', 1])
-command! -nargs=1 -complete=dir Find call FindInQuickfix(<q-args>, "")
-command! -nargs=? Workspace call <SID>FindInWorkspace(<q-args>)
+command! -nargs=+ -complete=customlist,FindCompl Find call QuickFind(<f-args>)
