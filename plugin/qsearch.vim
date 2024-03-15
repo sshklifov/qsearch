@@ -119,11 +119,8 @@ function! s:CmdFind(dir, ...)
   else
     let flags += a:000
   endif
-  " Add actions (ignore binary files)
-  let flags = flags + [
-        \ "-exec", "grep", "-Iq", ".", "{}", ";",
-        \ "-print"
-        \ ]
+  " Ignore executable files
+  let flags = flags + ["-not", "-perm", "/111"]
 
   let fullpath = fnamemodify(a:dir, ':p')
   let cmd = ["find", fullpath] + flags
