@@ -33,12 +33,10 @@ endfunction
 function! s:ShowItems(title)
   if empty(s:items)
     echo "No entries"
+  elseif len(s:items) == 1
+    exe "edit " . s:items[0].filename
   else
     call setqflist([], ' ', #{title: a:title, items: s:items})
-  endif
-  if len(s:items) == 1
-    cc
-  else
     copen
   endif
   unlet s:items
@@ -153,21 +151,3 @@ function! s:ListCmd(args)
 endfunction
 
 command! -nargs=? -complete=dir List call <SID>ListCmd(<q-args>)
-
-function! FindCompl(ArgLead, CmdLine, CursorPos) abort
-  if a:CursorPos < len(a:CmdLine)
-    return []
-  endif
-  let complete = 'complete -C ' . shellescape(substitute(a:CmdLine, 'Find', 'find', ''))
-  let output = system(["/usr/bin/fish", "-c", complete])
-
-  " Remove color codes
-  let output = substitute(output, "\x1b].*\x1b\\", "", "")
-  " Split into lines
-  let output = split(output, nr2char(10))
-  " Split by tab (remove completion description)
-  let compl = map(output, "split(v:val, nr2char(9))[0]")
-  return compl
-endfunction
-
-command! -nargs=+ -complete=customlist,FindCompl Find call QuickFind(<f-args>)
