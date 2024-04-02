@@ -34,8 +34,14 @@ function! s:ShowItems(title)
   if empty(s:items)
     echo "No entries"
   elseif len(s:items) == 1
-    exe "edit " . s:items[0].filename
-    exe s:items[0].lnum
+    if has_key(s:items[0], 'bufnr')
+      exe "b " . s:items[0].bufnr
+    elseif has_key(s:items[0], 'filename')
+      exe "edit " . s:items[0].filename
+    endif
+    if has_key(s:items[0], 'lnum')
+      exe s:items[0].lnum
+    endif
   else
     call setqflist([], ' ', #{title: a:title, items: s:items})
     copen
