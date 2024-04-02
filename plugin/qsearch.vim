@@ -35,6 +35,7 @@ function! s:ShowItems(title)
     echo "No entries"
   elseif len(s:items) == 1
     exe "edit " . s:items[0].filename
+    exe s:items[0].lnum
   else
     call setqflist([], ' ', #{title: a:title, items: s:items})
     copen
