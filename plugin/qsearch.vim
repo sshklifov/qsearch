@@ -34,9 +34,9 @@ function! s:ShowItems(title)
   if empty(s:items)
     echo "No entries"
   elseif len(s:items) == 1
-    if has_key(s:items[0], 'bufnr')
-      exe "b " . s:items[0].bufnr
-    elseif has_key(s:items[0], 'filename')
+    if has_key(s:items[0], 'bufnr') && bufnr() != s:items[0].bufnr
+      exe "b " . 
+    elseif has_key(s:items[0], 'filename') && bufnr() != bufnr(s:items[0].filename)
       exe "edit " . s:items[0].filename
     endif
     if has_key(s:items[0], 'lnum')
