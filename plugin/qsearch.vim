@@ -154,7 +154,7 @@ function! s:ListCmd(args)
   if empty(dir)
     let dir = getcwd()
   endif
-  call Quickfind(dir, '-maxdepth', 1)
+  call QuickFind(dir, '-maxdepth', 1)
 endfunction
 
 command! -nargs=? -complete=dir List call <SID>ListCmd(<q-args>)
