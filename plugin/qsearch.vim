@@ -61,7 +61,7 @@ function! s:ShowItems(title, ...)
   if len(items) == 1
     echo "Single hit."
     if bufnr() != items[0].bufnr
-      exe "b " .
+      exe "b " . items[0].bufnr
     endif
     if has_key(items[0], 'lnum') && has_key(items[0], 'col')
       call cursor(items[0].lnum, items[0].col)
