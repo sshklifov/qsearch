@@ -30,23 +30,54 @@ function! s:ExcludeFile(file)
   return v:false
 endfunction
 
-function! s:ShowItems(title)
-  if empty(s:items)
-    echo "No entries"
-  elseif len(s:items) == 1
-    if has_key(s:items[0], 'bufnr') && bufnr() != s:items[0].bufnr
-      exe "b " . 
-    elseif has_key(s:items[0], 'filename') && bufnr() != bufnr(s:items[0].filename)
-      exe "edit " . s:items[0].filename
+function s:AddBuffer(item)
+  let ret = a:item
+  let ret['bufnr'] = bufadd(a:item.filename)
+  return ret
+endfunction
+
+function s:AddColumn(regex, item)
+  let ret = a:item
+  if has_key(ret, 'lnum')
+    let str = getbufoneline(ret.bufnr, ret.lnum)
+    let [_, col, end] = matchstrpos(str, a:regex)
+    if col >= 0
+      let ret['col'] = col + 1
     endif
-    if has_key(s:items[0], 'lnum')
-      exe s:items[0].lnum
+  endif
+  return ret
+endfunction
+
+function! s:ShowItems(title, ...)
+  if !exists('s:items') || empty(s:items)
+    echo "No entries"
+    return
+  endif
+
+  let items = map(s:items, 's:AddBuffer(v:val)')
+  if a:0 > 0
+    let items = map(s:items, 's:AddColumn(a:1, v:val)')
+  endif
+  if len(items) == 1
+    echo "Single hit."
+    if bufnr() != items[0].bufnr
+      exe "b " .
+    endif
+    if has_key(items[0], 'lnum') && has_key(items[0], 'col')
+      call cursor(items[0].lnum, items[0].col)
     endif
   else
-    call setqflist([], ' ', #{title: a:title, items: s:items})
+    call setqflist([], ' ', #{title: a:title, items: items})
     copen
   endif
-  unlet s:items
+endfunction
+
+let s:job_id = -1
+function! s:JobStartOne(cmd, opts)
+  call jobstop(s:job_id)
+  let s:items = []
+  let s:job_id = jobstart(a:cmd, a:opts)
+  return s:job_id
 endfunction
 
 function! QuickGrep(regex, where)
@@ -64,7 +95,6 @@ function! QuickGrep(regex, where)
     return {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
   endfunction
 
-  let s:items = []
   function! CollectItems(id, data, event)
     let s:items += filter(map(a:data, funcref("Itemize")), "!empty(v:val)")
   endfunction
@@ -75,21 +105,21 @@ function! QuickGrep(regex, where)
     let cmd = cmd + ['-i']
   endif
   let cmd = cmd + ['-I', '-H', '-n', a:regex]
-  let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems("Grep")}}
+  let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems("Grep", a:regex)}}
 
   if type(a:where) == v:t_list
     let cmd = ['xargs'] + cmd
-    let id = jobstart(cmd, opts)
+    let id = s:JobStartOne(cmd, opts)
     call chansend(id, a:where)
     call chanclose(id, 'stdin')
     return id
   elseif isdirectory(a:where)
     let cmd = cmd + ['-R', a:where]
-    return jobstart(cmd, opts)
+    return s:JobStartOne(cmd, opts)
   else
     let fullpath = fnamemodify(a:where, ":p")
     let cmd = cmd + [fullpath]
-    return jobstart(cmd, opts)
+    return s:JobStartOne(cmd, opts)
   endif
 endfunction
 
@@ -133,7 +163,6 @@ function! s:CmdFind(dir, ...)
 endfunction
 
 function! QuickFind(dir, ...)
-  let s:items = []
   function! CollectItems(id, data, event)
     let files = filter(a:data, "filereadable(v:val)")
     let s:items += map(files, "#{filename: v:val}")
@@ -141,7 +170,7 @@ function! QuickFind(dir, ...)
 
   let cmd = s:CmdFind(a:dir, a:000)
   let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems('Find')}}
-  return jobstart(cmd, opts)
+  return s:JobStartOne(cmd, opts)
 endfunction
 
 function Find(dir, ...)
