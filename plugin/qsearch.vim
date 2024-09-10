@@ -39,11 +39,13 @@ endfunction
 function s:AddColumn(regex, item)
   let ret = a:item
   if has_key(ret, 'lnum')
+    call bufload(ret.bufnr)
     let str = getbufoneline(ret.bufnr, ret.lnum)
     let [_, col, end] = matchstrpos(str, a:regex)
-    if col >= 0
-      let ret['col'] = col + 1
+    if col < 0
+      let col = 0
     endif
+    let ret['col'] = col + 1
   endif
   return ret
 endfunction
