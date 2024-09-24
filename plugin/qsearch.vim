@@ -76,7 +76,9 @@ endfunction
 
 let s:job_id = -1
 function! s:JobStartOne(cmd, opts)
-  call jobstop(s:job_id)
+  if jobstop(s:job_id)
+    call jobwait([s:job_id])
+  endif
   let s:items = []
   let s:job_id = jobstart(a:cmd, a:opts)
   return s:job_id
