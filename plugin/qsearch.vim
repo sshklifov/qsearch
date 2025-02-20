@@ -18,7 +18,7 @@ endfunction
 
 function! s:ExcludeFile(file)
   for dir in g:qsearch_exclude_dirs
-    if stridx(a:file, dir) >= 0
+    if stridx(a:file, dir .. "/") >= 0
       return v:true
     endif
   endfor
@@ -36,7 +36,7 @@ function s:AddBuffer(item)
   return ret
 endfunction
 
-function s:AddColumn(regex, item)
+function s:AddColumn(item, regex)
   let ret = a:item
   if has_key(ret, 'lnum')
     call bufload(ret.bufnr)
@@ -50,66 +50,47 @@ function s:AddColumn(regex, item)
   return ret
 endfunction
 
-function! s:ShowItems(title, ...)
-  if !exists('s:items') || empty(s:items)
-    echo "No entries"
-    return
-  endif
-
-  let items = map(s:items, 's:AddBuffer(v:val)')
-  if a:0 > 0
-    let items = map(s:items, 's:AddColumn(a:1, v:val)')
-  endif
-  if len(items) == 1
-    echo "Single hit."
-    if bufnr() != items[0].bufnr
-      exe "b " . items[0].bufnr
-    endif
-    if has_key(items[0], 'lnum') && has_key(items[0], 'col')
-      call cursor(items[0].lnum, items[0].col)
-    endif
-  else
-    call setqflist([], ' ', #{title: a:title, items: items})
-    copen
-  endif
-endfunction
-
 let s:job_id = -1
 function! s:JobStartOne(cmd, opts)
   if jobstop(s:job_id)
     call jobwait([s:job_id])
   endif
-  let s:items = []
   let s:job_id = jobstart(a:cmd, a:opts)
   return s:job_id
 endfunction
 
-function! QuickGrep(regex, where)
-  function! Itemize(index, match)
-    let sp = split(a:match, ":")
+function! s:CollectGrepData(pat, exclude, _0, data, _1)
+  let items = []
+  for match in a:data
+    let sp = split(match, ":")
     if len(sp) < 3
-      return {}
+      continue
     endif
-    if !filereadable(sp[0]) || s:ExcludeFile(sp[0])
-      return {}
+    if !filereadable(sp[0])
+      continue
     endif
     if sp[1] !~ '^[0-9]\+$'
-      return {}
+      continue
     endif
-    return {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
-  endfunction
+    let item = {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
+    if !(a:exclude && s:ExcludeFile(sp[0]))
+      call add(items, item)
+    endif
+  endfor
+  
+  call map(items, 's:AddBuffer(v:val)')
+  call map(items, 's:AddColumn(v:val, a:pat)')
+  call DropInQf(items, "Grep")
+endfunction
 
-  function! CollectItems(id, data, event)
-    let s:items += filter(map(a:data, funcref("Itemize")), "!empty(v:val)")
-  endfunction
-
+function! s:Grep(regex, where, exclude)
   let cmd = ['grep']
   " Apply 'smartcase' to the regex
   if a:regex !~# "[A-Z]"
     let cmd = cmd + ['-i']
   endif
   let cmd = cmd + ['-I', '-H', '-n', a:regex]
-  let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems("Grep", a:regex)}}
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectGrepData', [a:regex, a:exclude])}
 
   if type(a:where) == v:t_list
     let cmd = ['xargs'] + cmd
@@ -125,6 +106,14 @@ function! QuickGrep(regex, where)
     let cmd = cmd + [fullpath]
     return s:JobStartOne(cmd, opts)
   endif
+endfunction
+
+function! QuickGrep(regex, where)
+  call s:Grep(a:regex, a:where, v:true)
+endfunction
+
+function! QuickGrepNoExclude(regex, where)
+  call s:Grep(a:regex, a:where, v:false)
 endfunction
 
 function! s:GrepFilesInQuickfix(regex)
@@ -166,28 +155,39 @@ function! s:CmdFind(dir, ...)
   return cmd
 endfunction
 
-function! QuickFind(dir, ...)
-  function! CollectItems(id, data, event)
-    let files = filter(a:data, "filereadable(v:val)")
-    let s:items += map(files, "#{filename: v:val}")
-  endfunction
+function! s:CollectFindData(exclude, _0, data, _1)
+  let items = []
+  for file in a:data
+    if !filereadable(file)
+      continue
+    endif
+    if a:exclude && s:ExcludeFile(file)
+      continue
+    endif
+    call add(items, #{filename: file})
+  endfor
+  call DropInQf(items, "Find")
+endfunction
 
+function! QuickFind(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
-  let opts = #{on_stdout: funcref('CollectItems'), on_exit: {-> s:ShowItems('Find')}}
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData')}
   return s:JobStartOne(cmd, opts)
 endfunction
 
-function Find(dir, ...)
+function! QuickFindNoExclude(dir, ...)
+  let cmd = s:CmdFind(a:dir, a:000)
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData')}
+  return s:JobStartOne(cmd, opts)
+endfunction
+
+function GetFiles(dir, ...)
+  let cmd = s:CmdFind(a:dir, a:000)
+  let ret = systemlist(cmd)
+  return filter(ret, '!s:ExcludeFile(v:val)')
+endfunction
+
+function GetFilesNoExclude(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
   return systemlist(cmd)
 endfunction
-
-function! s:ListCmd(args)
-  let dir = a:args
-  if empty(dir)
-    let dir = getcwd()
-  endif
-  call QuickFind(dir, '-maxdepth', 1)
-endfunction
-
-command! -nargs=? -complete=dir List call <SID>ListCmd(<q-args>)
