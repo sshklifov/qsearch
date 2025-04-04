@@ -63,19 +63,14 @@ function! s:CollectGrepData(pat, exclude, _0, data, _1)
   let items = []
   for match in a:data
     let sp = split(match, ":")
-    if len(sp) < 3
+    if len(sp) < 3 || !filereadable(sp[0]) || sp[1] !~ '^[0-9]\+$'
       continue
     endif
-    if !filereadable(sp[0])
-      continue
-    endif
-    if sp[1] !~ '^[0-9]\+$'
+    if a:exclude && s:ExcludeFile(sp[0])
       continue
     endif
     let item = {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
-    if !(a:exclude && s:ExcludeFile(sp[0]))
-      call add(items, item)
-    endif
+    call add(items, item)
   endfor
   
   call map(items, 's:AddBuffer(v:val)')
@@ -171,13 +166,13 @@ endfunction
 
 function! QuickFind(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
-  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData')}
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData', [v:true])}
   return s:JobStartOne(cmd, opts)
 endfunction
 
 function! QuickFindNoExclude(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
-  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData')}
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData', [v:false])}
   return s:JobStartOne(cmd, opts)
 endfunction
 
