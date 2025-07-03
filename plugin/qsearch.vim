@@ -12,10 +12,6 @@ if !exists('g:qsearch_exclude_files')
   let g:qsearch_exclude_files = []
 endif
 
-function! SearchFilter(list)
-  return filter(a:list, "!s:ExcludeFile(v:val)")
-endfunction
-
 function! s:ExcludeFile(file)
   for dir in g:qsearch_exclude_dirs
     if stridx(a:file, dir .. "/") >= 0
@@ -103,26 +99,34 @@ function! s:Grep(regex, where, exclude)
   endif
 endfunction
 
-function! QuickGrep(regex, where)
+function! qsearch#SearchFilter(list)
+  return filter(a:list, "!s:ExcludeFile(v:val)")
+endfunction
+
+function! qsearch#IsExcluded()
+  return s:ExcludeFile(expand("%:p"))
+endfunction
+
+function! qsearch#Grep(regex, where)
   call s:Grep(a:regex, a:where, v:true)
 endfunction
 
-function! QuickGrepNoExclude(regex, where)
+function! qsearch#GrepNoExclude(regex, where)
   call s:Grep(a:regex, a:where, v:false)
 endfunction
 
 function! s:GrepFilesInQuickfix(regex)
   let files = map(getqflist(), 'expand("#" . v:val.bufnr . ":p")')
   let files = uniq(sort(files))
-  call QuickGrep(a:regex, files)
+  call qsearch#Grep(a:regex, files)
 endfunction
 
 " Current buffer
-command! -nargs=1 Grep call QuickGrep(<q-args>, expand("%:p"))
+command! -nargs=1 Grep call qsearch#Grep(<q-args>, expand("%:p"))
 " All files in quickfix
 command! -nargs=1 Grepfix call <SID>GrepFilesInQuickfix(<q-args>)
 " Current path
-command! -nargs=1 Rgrep call QuickGrep(<q-args>, getcwd())
+command! -nargs=1 Rgrep call qsearch#Grep(<q-args>, getcwd())
 
 function! s:CmdFind(dir, ...)
   " Add exclude paths flags
@@ -164,25 +168,25 @@ function! s:CollectFindData(exclude, _0, data, _1)
   call DropInQf(items, "Find")
 endfunction
 
-function! QuickFind(dir, ...)
+function! qsearch#Find(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
   let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData', [v:true])}
   return s:JobStartOne(cmd, opts)
 endfunction
 
-function! QuickFindNoExclude(dir, ...)
+function! qsearch#FindNoExclude(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
   let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData', [v:false])}
   return s:JobStartOne(cmd, opts)
 endfunction
 
-function GetFiles(dir, ...)
+function qsearch#GetFiles(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
   let ret = systemlist(cmd)
   return filter(ret, '!s:ExcludeFile(v:val)')
 endfunction
 
-function GetFilesNoExclude(dir, ...)
+function qsearch#GetFilesNoExclude(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
   return systemlist(cmd)
 endfunction
