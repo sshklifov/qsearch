@@ -51,27 +51,33 @@ function! s:JobStartOne(cmd, opts)
   if jobstop(s:job_id)
     call jobwait([s:job_id])
   endif
-  let s:job_id = jobstart(a:cmd, a:opts)
+  let s:job_id = init#Jobstart(a:cmd, a:opts)
   return s:job_id
 endfunction
 
-function! s:CollectGrepData(pat, exclude, _0, data, _1)
+function! s:CollectGrepData(pat, exclude, b, _, data, _1)
   let items = []
+  let stdin_mode = v:false
   for match in a:data
     let sp = split(match, ":")
-    if len(sp) < 3 || !filereadable(sp[0]) || sp[1] !~ '^[0-9]\+$'
+    if len(sp) < 3 || sp[1] !~ '^[0-9]\+$'
       continue
     endif
-    if a:exclude && s:ExcludeFile(sp[0])
-      continue
+    if sp[0] == "(standard input)"
+      let stdin_mode = v:true
+      let item = {"bufnr": a:b, "lnum": sp[1], 'text': join(sp[2:-1], ":")}
+      call add(items, item)
+    elseif filereadable(sp[0]) && !(a:exclude && s:ExcludeFile(sp[0]))
+      let item = {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
+      call add(items, item)
     endif
-    let item = {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
-    call add(items, item)
   endfor
   
-  call map(items, 's:AddBuffer(v:val)')
+  if !stdin_mode
+    call map(items, 's:AddBuffer(v:val)')
+  endif
   call map(items, 's:AddColumn(v:val, a:pat)')
-  call DropInQf(items, "Grep")
+  call qutil#DropInQuickfix(items, "Grep")
 endfunction
 
 function! s:Grep(regex, where, exclude)
@@ -81,7 +87,8 @@ function! s:Grep(regex, where, exclude)
     let cmd = cmd + ['-i']
   endif
   let cmd = cmd + ['-I', '-H', '-n', a:regex]
-  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectGrepData', [a:regex, a:exclude])}
+  let Cb = function('s:CollectGrepData', [a:regex, a:exclude, bufnr()])
+  let opts = #{stdout_buffered: 1, on_stdout: Cb}
 
   if type(a:where) == v:t_list
     let cmd = ['xargs'] + cmd
@@ -92,6 +99,12 @@ function! s:Grep(regex, where, exclude)
   elseif isdirectory(a:where)
     let cmd = cmd + ['-R', a:where]
     return s:JobStartOne(cmd, opts)
+  elseif str2nr(a:where) == a:where
+    let id = s:JobStartOne(cmd, opts)
+    let lines = getbufline(a:where, 1, '$')
+    call chansend(id, lines)
+    call chanclose(id, 'stdin')
+    return id
   else
     let fullpath = fnamemodify(a:where, ":p")
     let cmd = cmd + [fullpath]
@@ -122,7 +135,7 @@ function! s:GrepFilesInQuickfix(regex)
 endfunction
 
 " Current buffer
-command! -nargs=1 Grep call qsearch#Grep(<q-args>, expand("%:p"))
+command! -nargs=1 Grep call qsearch#Grep(<q-args>, bufnr())
 " All files in quickfix
 command! -nargs=1 Grepfix call <SID>GrepFilesInQuickfix(<q-args>)
 " Current path
@@ -165,7 +178,7 @@ function! s:CollectFindData(exclude, _0, data, _1)
     endif
     call add(items, #{filename: file})
   endfor
-  call DropInQf(items, "Find")
+  call qutil#DropInQuickfix(items, "Find")
 endfunction
 
 function! qsearch#Find(dir, ...)
