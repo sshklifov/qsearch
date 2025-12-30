@@ -12,6 +12,18 @@ if !exists('g:qsearch_exclude_files')
   let g:qsearch_exclude_files = []
 endif
 
+if !exists('g:qsearch_max_matches')
+  let g:qsearch_max_matches = 1000
+endif
+
+function s:LimitMatches(data)
+  if len(a:data) > g:qsearch_max_matches
+    call init#Warn("Got total %d matches, truncating...", len(a:data))
+    return a:data[:g:qsearch_max_matches-1]
+  endif
+  return a:data
+endfunction
+
 function! s:ExcludeFile(file)
   for dir in g:qsearch_exclude_dirs
     if stridx(a:file, dir .. "/") >= 0
@@ -56,9 +68,10 @@ function! s:JobStartOne(cmd, opts)
 endfunction
 
 function! s:CollectGrepData(pat, exclude, b, _, data, _1)
+  let data = s:LimitMatches(a:data)
   let items = []
   let stdin_mode = v:false
-  for match in a:data
+  for match in data
     let sp = split(match, ":")
     if len(sp) < 3 || sp[1] !~ '^[0-9]\+$'
       continue
@@ -168,17 +181,21 @@ function! s:CmdFind(dir, ...)
 endfunction
 
 function! s:CollectFindData(exclude, _0, data, _1)
-  let items = []
-  for file in a:data
-    if !filereadable(file)
-      continue
-    endif
-    if a:exclude && s:ExcludeFile(file)
-      continue
-    endif
-    call add(items, #{filename: file})
-  endfor
+  let data = a:data
+  if a:exclude
+    let data = filter(data, 's:ExcludeFile(v:val)')
+  endif
+  let data = filter(data, '!filereadable(v:val)')
+  let items = map(data, '#{filename: v:val}')
+  let data = s:LimitMatches(data)
   call qutil#DropInQuickfix(items, "Find")
+endfunction
+
+function! s:WrapFindData(cb, _0, data, _1)
+  let data = filter(a:data, '!s:ExcludeFile(v:val)')
+  let data = s:LimitMatches(data)
+  let Cb = function(a:cb)
+  return Cb(data)
 endfunction
 
 function! qsearch#Find(dir, ...)
@@ -187,19 +204,15 @@ function! qsearch#Find(dir, ...)
   return s:JobStartOne(cmd, opts)
 endfunction
 
-function! qsearch#FindNoExclude(dir, ...)
-  let cmd = s:CmdFind(a:dir, a:000)
-  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData', [v:false])}
+function qsearch#OnFiles(dir, flags, cb)
+  let cmd = s:CmdFind(a:dir, a:flags)
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:WrapFindData', [a:cb])}
   return s:JobStartOne(cmd, opts)
 endfunction
 
 function qsearch#GetFiles(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
   let ret = systemlist(cmd)
-  return filter(ret, '!s:ExcludeFile(v:val)')
-endfunction
-
-function qsearch#GetFilesNoExclude(dir, ...)
-  let cmd = s:CmdFind(a:dir, a:000)
-  return systemlist(cmd)
+  let ret = filter(ret, '!s:ExcludeFile(v:val)')
+  return s:LimitMatches(ret)
 endfunction
