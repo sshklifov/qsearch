@@ -192,7 +192,7 @@ function! s:CollectFindData(exclude, _0, data, _1)
 endfunction
 
 function! s:WrapFindData(cb, _0, data, _1)
-  let data = filter(a:data, '!s:ExcludeFile(v:val)')
+  let data = filter(a:data, '!s:ExcludeFile(v:val) && filereadable(v:val)')
   let data = s:LimitMatches(data)
   let Cb = function(a:cb)
   return Cb(data)
