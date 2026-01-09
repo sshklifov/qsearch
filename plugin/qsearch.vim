@@ -183,9 +183,9 @@ endfunction
 function! s:CollectFindData(exclude, _0, data, _1)
   let data = a:data
   if a:exclude
-    let data = filter(data, 's:ExcludeFile(v:val)')
+    let data = filter(data, '!s:ExcludeFile(v:val)')
   endif
-  let data = filter(data, '!filereadable(v:val)')
+  let data = filter(data, 'filereadable(v:val)')
   let items = map(data, '#{filename: v:val}')
   let data = s:LimitMatches(data)
   call qutil#DropInQuickfix(items, "Find")
