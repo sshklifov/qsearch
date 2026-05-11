@@ -16,26 +16,12 @@ if !exists('g:qsearch_max_matches')
   let g:qsearch_max_matches = 1000
 endif
 
-function s:LimitMatches(data)
+function s:LimitData(data)
   if len(a:data) > g:qsearch_max_matches
     call init#Warn("Got total %d matches, truncating...", len(a:data))
     return a:data[:g:qsearch_max_matches-1]
   endif
   return a:data
-endfunction
-
-function! s:ExcludeFile(file)
-  for dir in g:qsearch_exclude_dirs
-    if stridx(a:file, dir .. "/") >= 0
-      return v:true
-    endif
-  endfor
-  for file in g:qsearch_exclude_files
-    if a:file[-len(file):-1] == file
-      return v:true
-    endif
-  endfor
-  return v:false
 endfunction
 
 function s:AddBuffer(item)
@@ -67,11 +53,10 @@ function! s:JobStartOne(cmd, opts)
   return s:job_id
 endfunction
 
-function! s:CollectGrepData(pat, exclude, b, _, data, _1)
-  let data = s:LimitMatches(a:data)
+function! s:CollectGrepData(pat, b, _, data, _1)
   let items = []
   let stdin_mode = v:false
-  for match in data
+  for match in a:data
     let sp = split(match, ":")
     if len(sp) < 3 || sp[1] !~ '^[0-9]\+$'
       continue
@@ -80,11 +65,12 @@ function! s:CollectGrepData(pat, exclude, b, _, data, _1)
       let stdin_mode = v:true
       let item = {"bufnr": a:b, "lnum": sp[1], 'text': join(sp[2:-1], ":")}
       call add(items, item)
-    elseif filereadable(sp[0]) && !(a:exclude && s:ExcludeFile(sp[0]))
+    elseif filereadable(sp[0])
       let item = {"filename": sp[0], "lnum": sp[1], 'text': join(sp[2:-1], ":")}
       call add(items, item)
     endif
   endfor
+  let items = s:LimitData(items)
   
   if !stdin_mode
     call map(items, 's:AddBuffer(v:val)')
@@ -99,8 +85,17 @@ function! s:Grep(regex, where, exclude)
   if a:regex !~# "[A-Z]"
     let cmd = cmd + ['-i']
   endif
-  let cmd = cmd + ['-I', '-H', '-n', a:regex]
-  let Cb = function('s:CollectGrepData', [a:regex, a:exclude, bufnr()])
+  let cmd = cmd + ['-I', '-H', '-n']
+  if a:exclude
+    for dir in g:qsearch_exclude_dirs
+      call add(cmd, '--exclude-dir=' .. dir)
+    endfor
+    for file in g:qsearch_exclude_files
+      call add(cmd, '--exclude=' .. file)
+    endfor
+  endif
+  call add(cmd, a:regex)
+  let Cb = function('s:CollectGrepData', [a:regex, bufnr()])
   let opts = #{stdout_buffered: 1, on_stdout: Cb}
 
   if type(a:where) == v:t_list
@@ -125,34 +120,22 @@ function! s:Grep(regex, where, exclude)
   endif
 endfunction
 
-function! qsearch#SearchFilter(list)
-  return filter(a:list, "!s:ExcludeFile(v:val)")
-endfunction
-
-function! qsearch#IsExcluded()
-  return s:ExcludeFile(expand("%:p"))
-endfunction
-
 function! qsearch#Grep(regex, where)
   call s:Grep(a:regex, a:where, v:true)
 endfunction
 
-function! qsearch#GrepNoExclude(regex, where)
-  call s:Grep(a:regex, a:where, v:false)
-endfunction
-
-function! s:GrepFilesInQuickfix(regex)
+function! s:GrepFilesInQuickfix(bang, regex)
   let files = map(getqflist(), 'expand("#" . v:val.bufnr . ":p")')
   let files = uniq(sort(files))
-  call qsearch#Grep(a:regex, files)
+  call s:Grep(a:regex, files, !empty(a:bang))
 endfunction
 
 " Current buffer
-command! -nargs=1 Grep call qsearch#Grep(<q-args>, bufnr())
+command! -nargs=1 -bang Grep call s:Grep(<q-args>, bufnr(), <bang>1)
 " All files in quickfix
-command! -nargs=1 Grepfix call <SID>GrepFilesInQuickfix(<q-args>)
+command! -nargs=1 -bang Grepfix call <SID>GrepFilesInQuickfix("<bang>", <q-args>)
 " Current path
-command! -nargs=1 Rgrep call qsearch#Grep(<q-args>, getcwd())
+command! -nargs=1 -bang Rgrep call s:Grep(<q-args>, getcwd(), <bang>1)
 
 function! s:CmdFind(dir, ...)
   " Add exclude paths flags
@@ -180,39 +163,34 @@ function! s:CmdFind(dir, ...)
   return cmd
 endfunction
 
-function! s:CollectFindData(exclude, _0, data, _1)
-  let data = a:data
-  if a:exclude
-    let data = filter(data, '!s:ExcludeFile(v:val)')
-  endif
+function! s:CollectFindData(_0, data, _1)
   let data = filter(data, 'filereadable(v:val)')
-  let data = s:LimitMatches(data)
+  let data = LimitData(data)
   let items = map(data, '#{filename: v:val}')
   call qutil#DropInQuickfix(items, "Find")
 endfunction
 
-function! s:WrapFindData(cb, _0, data, _1)
-  let data = filter(a:data, '!s:ExcludeFile(v:val) && filereadable(v:val)')
-  let data = s:LimitMatches(data)
+function! qsearch#Find(dir, ...)
+  let cmd = s:CmdFind(a:dir, a:000)
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData')}
+  return s:JobStartOne(cmd, opts)
+endfunction
+
+function! s:WrapOnFiles(cb, _0, data, _1)
+  let data = filter(a:data, 'filereadable(v:val)')
+  let data = s:LimitData(data)
   let Cb = function(a:cb)
   return Cb(data)
 endfunction
 
-function! qsearch#Find(dir, ...)
-  let cmd = s:CmdFind(a:dir, a:000)
-  let opts = #{stdout_buffered: 1, on_stdout: function('s:CollectFindData', [v:true])}
-  return s:JobStartOne(cmd, opts)
-endfunction
-
 function qsearch#OnFiles(dir, flags, cb)
   let cmd = s:CmdFind(a:dir, a:flags)
-  let opts = #{stdout_buffered: 1, on_stdout: function('s:WrapFindData', [a:cb])}
+  let opts = #{stdout_buffered: 1, on_stdout: function('s:WrapOnFiles', [a:cb])}
   return s:JobStartOne(cmd, opts)
 endfunction
 
 function qsearch#GetFiles(dir, ...)
   let cmd = s:CmdFind(a:dir, a:000)
   let ret = systemlist(cmd)
-  let ret = filter(ret, '!s:ExcludeFile(v:val)')
-  return s:LimitMatches(ret)
+  return s:LimitData(ret)
 endfunction
