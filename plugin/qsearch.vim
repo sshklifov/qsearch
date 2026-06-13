@@ -164,8 +164,8 @@ function! s:CmdFind(dir, ...)
 endfunction
 
 function! s:CollectFindData(_0, data, _1)
-  let data = filter(data, 'filereadable(v:val)')
-  let data = LimitData(data)
+  let data = filter(a:data, 'filereadable(v:val)')
+  let data = s:LimitData(data)
   let items = map(data, '#{filename: v:val}')
   call qutil#DropInQuickfix(items, "Find")
 endfunction
